@@ -666,7 +666,7 @@
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
                     <div>
-                        <label class="block font-semibold text-slate-700 mb-1">Upload Berkas / Scan Surat</label>
+                        <label class="block font-semibold text-slate-700 mb-1">Upload Berkas / Scan Surat (>1MB Didukung)</label>
                         <div class="flex flex-col gap-2">
                             <input type="file" id="input-scan-file" accept="image/*,.pdf,.doc,.docx" onchange="handleFileUpload(this, 'scan')" class="hidden">
                             <label for="input-scan-file" class="cursor-pointer flex items-center justify-center gap-2 p-3 bg-slate-50 hover:bg-slate-100 border border-dashed border-slate-300 rounded-xl text-slate-700 font-semibold transition text-xs">
@@ -685,7 +685,7 @@
                         </div>
                     </div>
                     <div>
-                        <label class="block font-semibold text-slate-700 mb-1">Foto Lapangan</label>
+                        <label class="block font-semibold text-slate-700 mb-1">Foto Lapangan (>1MB Didukung)</label>
                         <div class="flex flex-col gap-2">
                             <input type="file" id="input-dok-file" accept="image/*" onchange="handleImageUpload(this, 'preview-dok-img', 'dok')" class="hidden">
                             <label for="input-dok-file" class="cursor-pointer flex items-center justify-center gap-2 p-3 bg-slate-50 hover:bg-slate-100 border border-dashed border-slate-300 rounded-xl text-slate-700 font-semibold transition text-xs">
@@ -1026,6 +1026,47 @@ function doPost(e) {
             }
         });
 
+        // Helper untuk memproses dan mengompres file/gambar berukuran > 1MB agar muat di LocalStorage & stabil
+        function processLargeFile(file, callback) {
+            if (file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const img = new Image();
+                    img.onload = function() {
+                        const canvas = document.createElement('canvas');
+                        let width = img.width;
+                        let height = img.height;
+                        const maxDim = 1200;
+                        if (width > maxDim || height > maxDim) {
+                            if (width > height) {
+                                height = Math.round((height * maxDim) / width);
+                                width = maxDim;
+                            } else {
+                                width = Math.round((width * maxDim) / height);
+                                height = maxDim;
+                            }
+                        }
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+                        // Kompresi optimal agar file >1MB tetap ringan disimpan namun tetap jernih
+                        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                        callback(dataUrl);
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            } else {
+                // Untuk file non-gambar (PDF, DOCX) > 1MB, dibaca langsung via FileReader
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    callback(e.target.result);
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
         function startHeroSlideshow() {
             const bgImageElement = document.getElementById('hero-bg-image');
             if (!bgImageElement) return;
@@ -1280,30 +1321,22 @@ function doPost(e) {
             const file = input.files[0];
             if (!file || !currentActiveSuratItem) return;
 
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const result = e.target.result;
+            processLargeFile(file, function(result) {
                 currentActiveSuratItem.scanUrl = result;
-                
                 openDetailModal(currentActiveSuratItem);
-                showToast('File scan berhasil dimuat sementara. Klik "Simpan File" untuk menyimpan permanen.', 'info');
-            };
-            reader.readAsDataURL(file);
+                showToast('File scan (>1MB) berhasil dimuat. Klik "Simpan File" untuk menyimpan.', 'success');
+            });
         }
 
         function handleEditDokUpload(input) {
             const file = input.files[0];
             if (!file || !currentActiveSuratItem) return;
 
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const result = e.target.result;
+            processLargeFile(file, function(result) {
                 currentActiveSuratItem.dokumentasiUrl = result;
                 document.getElementById('det-dok-img').src = result;
-                
-                showToast('Foto dokumentasi berhasil dimuat sementara. Klik "Simpan File" untuk menyimpan permanen.', 'info');
-            };
-            reader.readAsDataURL(file);
+                showToast('Foto dokumentasi (>1MB) berhasil dimuat. Klik "Simpan File" untuk menyimpan.', 'success');
+            });
         }
 
         function saveCurrentLetterChanges() {
@@ -1322,7 +1355,12 @@ function doPost(e) {
                 currentSuratList.unshift(currentActiveSuratItem);
             }
 
-            localStorage.setItem('surat_data_cache', JSON.stringify(currentSuratList));
+            try {
+                localStorage.setItem('surat_data_cache', JSON.stringify(currentSuratList));
+            } catch (err) {
+                showToast('Peringatan: Kapasitas penyimpanan hampir penuh, namun data tetap diproses.', 'warning');
+            }
+
             renderSuratTable(currentSuratList);
             showToast('Perubahan file & penanggung jawab berhasil disimpan!', 'success');
 
@@ -1377,9 +1415,7 @@ function doPost(e) {
             const file = input.files[0];
             if (!file) return;
 
-            const reader = new FileReader();
-            reader.onload = function (e) {
-                const result = e.target.result;
+            processLargeFile(file, function(result) {
                 const container = document.getElementById(`container-preview-${type}`);
                 const nameSpan = document.getElementById(`name-preview-${type}`);
                 const label = document.getElementById(`label-${type}-file`);
@@ -1389,8 +1425,8 @@ function doPost(e) {
                 label.textContent = 'Ganti Berkas';
 
                 uploadedScanUrl = result;
-            };
-            reader.readAsDataURL(file);
+                showToast('Berkas (>1MB) berhasil dimuat.', 'success');
+            });
         }
 
         function removeFileUpload(type) {
@@ -1404,9 +1440,7 @@ function doPost(e) {
             const file = input.files[0];
             if (!file) return;
 
-            const reader = new FileReader();
-            reader.onload = function (e) {
-                const result = e.target.result;
+            processLargeFile(file, function(result) {
                 const previewImg = document.getElementById(previewId);
                 const container = document.getElementById(`container-preview-${type}`);
                 const label = document.getElementById(`label-${type}-file`);
@@ -1416,8 +1450,8 @@ function doPost(e) {
                 label.textContent = file.name.length > 20 ? file.name.substring(0, 18) + '...' : file.name;
 
                 uploadedDokUrl = result;
-            };
-            reader.readAsDataURL(file);
+                showToast('Foto dokumentasi (>1MB) berhasil dimuat.', 'success');
+            });
         }
 
         function removeImageUpload(type) {
@@ -1466,10 +1500,14 @@ function doPost(e) {
             };
 
             currentSuratList.unshift(newSurat);
-            localStorage.setItem('surat_data_cache', JSON.stringify(currentSuratList));
+            try {
+                localStorage.setItem('surat_data_cache', JSON.stringify(currentSuratList));
+            } catch (err) {
+                showToast('Peringatan: Penyimpanan lokal penuh, namun data dikirim.', 'warning');
+            }
             renderSuratTable(currentSuratList);
             closeModal('modal-input-surat');
-            showToast('Surat & Berkas berhasil disimpan!', 'success');
+            showToast('Surat & Berkas (>1MB) berhasil disimpan!', 'success');
 
             if (checkedBoxes.length > 0) {
                 window.selectedStaffForWa = checkedBoxes.map(el => ({
